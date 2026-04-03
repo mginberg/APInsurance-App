@@ -1,0 +1,10 @@
+fastapi==0.129.0
+uvicorn==0.41.0
+httpx==0.28.1
+python-dotenv==1.2.1
+pydantic[email]==2.12.5
+sqlalchemy==2.0.40
+bcrypt==4.3.0
+pyjwt==2.10.1
+psycopg2-binary==2.9.10
+python-multipart==0.0.20
