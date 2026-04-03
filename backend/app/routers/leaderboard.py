@@ -36,7 +36,7 @@ class SlimContact:
 
 
 agency_caches: dict[str, tuple[list[SlimContact], float]] = {}
-CACHE_TTL = 300  # 5 minutes — reduces slow cold-cache fetches
+CACHE_TTL = 30  # 30 seconds — near-realtime leaderboard updates
 
 
 def _extract_field(custom_fields: list, field_id: str) -> Optional[str]:
