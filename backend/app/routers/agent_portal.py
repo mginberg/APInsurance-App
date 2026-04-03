@@ -82,24 +82,24 @@ TZ = ZoneInfo(os.getenv("TIMEZONE", "America/New_York"))
 GHL_PLAN_NAME_FIELD_ID_DEFAULT = os.getenv("GHL_PLAN_NAME_FIELD_ID", "")
 
 COMMISSION_FIELD_IDS = {
-    "advance_amount": "",
-    "chargeback_amount": "",
-    "chargeback_date": "",
-    "commission_status": "",
-    "statement_source": "",
-    "transaction_type": "",
-    "transaction_code": "",
-    "transaction_reason": "",
-    "code_reason": "",
-    "wc_transaction_type": "",
-    "wc_transaction_code": "",
-    "paid_to_date": "",
-    "last_activity_date": "",
+    "advance_amount": "rCi4tXps9wESiJ0x0XiV",
+    "chargeback_amount": "L0vXXdqaRYJuZOpAOOHz",
+    "chargeback_date": "4QAy1aVGNPvK7WOowE2E",
+    "commission_status": "YAg9HHNsx8fGts4CeVQr",
+    "statement_source": "6oz2H79SJlLBwxpDuL3g",
+    "transaction_type": "554NFCkbFZxcokqXajOH",
+    "transaction_code": "w3KUPmjV5tw6saUBSqzz",
+    "transaction_reason": "l7XLJ0JYXliiWZ4wQxRc",
+    "code_reason": "SLKwpuoiU3uPCkFsw5X4",
+    "wc_transaction_type": "554NFCkbFZxcokqXajOH",
+    "wc_transaction_code": "w3KUPmjV5tw6saUBSqzz",
+    "paid_to_date": "Q1HJfFTFXpdwHL6g0PL2",
+    "last_activity_date": "hYUpojFbAcLuiPf72qrt",
 }
 
-POLICY_NUMBER_FIELD_ID = ""
-EFFECTIVE_DATE_FIELD_ID = ""
-PREMIUM_DRAFT_DATE_FIELD_ID = ""
+POLICY_NUMBER_FIELD_ID = "FTrS62XRKzMJa13FBKYm"
+EFFECTIVE_DATE_FIELD_ID = "YHGc05k3v3Feb7Yu4GlF"
+PREMIUM_DRAFT_DATE_FIELD_ID = "eAM7bAij8So6a0yf2Hia"
 
 
 def _safe_float(val: Optional[str]) -> float:
