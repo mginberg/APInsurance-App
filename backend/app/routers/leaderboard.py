@@ -11,8 +11,11 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Agency
 
+import logging
 import os
 import time
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["leaderboard"])
 
@@ -86,6 +89,7 @@ async def fetch_contacts_for_agency(api_key: str, location_id: str, agent_field_
                     },
                 )
                 if response.status_code != 200:
+                    logger.warning("GHL contacts/search returned %s for location %s", response.status_code, location_id)
                     break
 
                 data = response.json()
@@ -99,7 +103,8 @@ async def fetch_contacts_for_agency(api_key: str, location_id: str, agent_field_
                 if fetched >= total or len(batch) == 0:
                     break
                 page += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning("GHL contacts/search failed for location %s: %s", location_id, exc)
                 break
     return slim
 
@@ -111,13 +116,17 @@ async def get_cached_contacts(api_key: str, location_id: str, agent_field_id: st
         cached, ts = agency_caches[cache_key]
         if (now - ts) < CACHE_TTL:
             return cached
-        else:
-            agency_caches.pop(cache_key, None)
-    # Clear any other expired entries
-    expired = [k for k, (_, ts) in agency_caches.items() if (now - ts) >= CACHE_TTL]
+    # Clear any other expired entries (but keep our own stale data as fallback)
+    expired = [k for k, (_, ts) in agency_caches.items() if (now - ts) >= CACHE_TTL and k != cache_key]
     for k in expired:
         agency_caches.pop(k, None)
     contacts = await fetch_contacts_for_agency(api_key, location_id, agent_field_id, premium_field_id, plan_name_field_id)
+    # Never cache empty results if we had previous valid data — GHL may have failed silently
+    if not contacts and cache_key in agency_caches:
+        stale, _ = agency_caches[cache_key]
+        if stale:
+            logger.warning("GHL returned 0 contacts for %s — serving stale cache (%d contacts)", cache_key, len(stale))
+            return stale
     agency_caches[cache_key] = (contacts, now)
     return contacts
 
