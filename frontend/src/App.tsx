@@ -640,6 +640,7 @@ function Portal() {
                   {currentTab === 'agents' && 'Agent Management'}
                   {currentTab === 'hourly' && 'Hourly Report'}
                   {currentTab === 'submission_agents' && 'Submission Agents'}
+                  {currentTab === 'audit' && 'Commission Audit'}
                   {currentTab === 'settings' && 'Settings'}
                   {currentTab === 'deals' && 'My Deals'}
                 </span>
@@ -650,6 +651,7 @@ function Portal() {
                 {currentTab === 'agents' && 'Agent Management'}
                 {currentTab === 'hourly' && 'Hourly Report'}
                 {currentTab === 'submission_agents' && 'Submission Agents'}
+                {currentTab === 'audit' && 'Commission Audit'}
                 {currentTab === 'settings' && 'Settings'}
                 {currentTab === 'deals' && 'My Deals'}
               </h1>

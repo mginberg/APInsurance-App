@@ -1486,6 +1486,8 @@ async def commission_audit(
     agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
     if not agency:
         raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
 
     api_key = agency.ghl_api_key
     location_id = agency.ghl_location_id
@@ -1551,6 +1553,8 @@ async def clear_commission_data(
     agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
     if not agency:
         raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
 
     api_key = agency.ghl_api_key
     location_id = agency.ghl_location_id
@@ -1585,7 +1589,7 @@ async def clear_commission_data(
         return {"cleared": 0, "total_scanned": len(all_contacts), "message": "No contacts with commission data found"}
 
     # Build clear updates
-    clear_fields = [{"id": fid, "field_value": ""} for fid in field_id_set]
+    clear_fields = [{"id": fid, "value": ""} for fid in field_id_set]
     pending_updates = [(cid, clear_fields) for cid, _ in to_clear]
 
     synced = await _run_concurrent_updates(api_key, pending_updates)
@@ -1608,6 +1612,8 @@ async def clear_selected_commission_data(
     agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
     if not agency:
         raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
 
     api_key = agency.ghl_api_key
     if not api_key:
@@ -1618,7 +1624,7 @@ async def clear_selected_commission_data(
 
     agency_field_ids = _get_commission_field_ids(agency)
     field_ids = {**GHL_COMMISSION_FIELD_IDS, **agency_field_ids}
-    clear_fields = [{"id": fid, "field_value": ""} for fid in field_ids.values()]
+    clear_fields = [{"id": fid, "value": ""} for fid in field_ids.values()]
     pending_updates = [(cid, clear_fields) for cid in contact_ids]
 
     synced = await _run_concurrent_updates(api_key, pending_updates)
