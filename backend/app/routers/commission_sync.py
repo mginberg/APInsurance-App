@@ -1473,7 +1473,7 @@ async def get_unmatched_records(
 # ── Commission Audit ──────────────────────────────────────────────
 
 
-POLICY_NUMBER_FIELD_ID_AUDIT = "MElxhb8gTHUIQocxEEkQ"
+POLICY_NUMBER_FIELD_ID_AUDIT = POLICY_NUMBER_FIELD_ID
 
 
 @router.get("/{agency_slug}/audit")
@@ -1624,7 +1624,7 @@ async def clear_selected_commission_data(
 
     agency_field_ids = _get_commission_field_ids(agency)
     field_ids = {**GHL_COMMISSION_FIELD_IDS, **agency_field_ids}
-    clear_fields = [{"id": fid, "value": ""} for fid in field_ids.values()]
+    clear_fields = [{"id": fid, "value": ""} for fid in set(field_ids.values())]
     pending_updates = [(cid, clear_fields) for cid in contact_ids]
 
     synced = await _run_concurrent_updates(api_key, pending_updates)

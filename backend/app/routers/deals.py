@@ -190,36 +190,46 @@ def _slim_raw_contact(raw: dict) -> dict:
 
 
 async def _fetch_all_contacts(api_key: str, location_id: str) -> list[dict]:
+    """Fetch all GHL contacts using cursor-based pagination (startAfterId).
+
+    The GHL search API caps page-based pagination at ~800 results.
+    Cursor-based pagination using the last contact's ID has no such limit.
+    """
     all_contacts: list[dict] = []
-    page = 1
+    start_after_id: Optional[str] = None
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Version": "2021-07-28",
+        "Content-Type": "application/json",
+    }
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
+                body: dict = {
+                    "locationId": location_id,
+                    "pageLimit": 100,
+                }
+                if start_after_id:
+                    body["startAfterId"] = start_after_id
                 response = await client.post(
                     f"{GHL_BASE_URL}/contacts/search",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Version": "2021-07-28",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "locationId": location_id,
-                        "page": page,
-                        "pageLimit": 100,
-                    },
+                    headers=headers,
+                    json=body,
                 )
                 if response.status_code != 200:
+                    logger.warning("GHL search returned %s, stopping pagination", response.status_code)
                     break
                 data = response.json()
                 batch = data.get("contacts", [])
-                total = data.get("total", 0)
-                # Slim each contact before caching — keep only fields we use
-                all_contacts.extend(_slim_raw_contact(c) for c in batch)
-                fetched = page * 100 if len(batch) == 100 else (page - 1) * 100 + len(batch)
-                if fetched >= total or len(batch) == 0:
+                if not batch:
                     break
-                page += 1
+                all_contacts.extend(_slim_raw_contact(c) for c in batch)
+                # Use the last contact's ID as cursor for the next page
+                start_after_id = batch[-1].get("id")
+                if not start_after_id or len(batch) < 100:
+                    break
             except Exception:
+                logger.exception("Error during GHL contact fetch, stopping")
                 break
     return all_contacts
 
