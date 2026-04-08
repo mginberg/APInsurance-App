@@ -190,47 +190,48 @@ def _slim_raw_contact(raw: dict) -> dict:
 
 
 async def _fetch_all_contacts(api_key: str, location_id: str) -> list[dict]:
-    """Fetch all GHL contacts using cursor-based pagination (startAfterId).
+    """Fetch all GHL contacts using the GET /contacts/ endpoint with cursor pagination.
 
-    The GHL search API caps page-based pagination at ~800 results.
-    Cursor-based pagination using the last contact's ID has no such limit.
+    The POST /contacts/search endpoint caps page-based pagination at ~800 results
+    and does not support startAfterId.  The GET endpoint uses meta.startAfter and
+    meta.startAfterId cursors with no such limit.
     """
     all_contacts: list[dict] = []
-    start_after_id: Optional[str] = None
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Version": "2021-07-28",
-        "Content-Type": "application/json",
+    }
+    params: dict = {
+        "locationId": location_id,
+        "limit": 100,
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
-                body: dict = {
-                    "locationId": location_id,
-                    "pageLimit": 100,
-                }
-                if start_after_id:
-                    body["startAfterId"] = start_after_id
-                response = await client.post(
-                    f"{GHL_BASE_URL}/contacts/search",
+                response = await client.get(
+                    f"{GHL_BASE_URL}/contacts/",
                     headers=headers,
-                    json=body,
+                    params=params,
                 )
                 if response.status_code != 200:
-                    logger.warning("GHL search returned %s, stopping pagination", response.status_code)
+                    logger.warning("GHL contacts returned %s, stopping pagination", response.status_code)
                     break
                 data = response.json()
                 batch = data.get("contacts", [])
                 if not batch:
                     break
                 all_contacts.extend(_slim_raw_contact(c) for c in batch)
-                # Use the last contact's ID as cursor for the next page
-                start_after_id = batch[-1].get("id")
-                if not start_after_id or len(batch) < 100:
+                meta = data.get("meta", {})
+                next_after_id = meta.get("startAfterId")
+                next_after = meta.get("startAfter")
+                if not next_after_id or not next_after or len(batch) < 100:
                     break
+                params["startAfterId"] = next_after_id
+                params["startAfter"] = next_after
             except Exception:
                 logger.exception("Error during GHL contact fetch, stopping")
                 break
+    logger.info("Fetched %d total contacts for location %s", len(all_contacts), location_id)
     return all_contacts
 
 
