@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useParams, useNavigate } from 'react-rout
 import {
   Trophy, Medal, Star, Flame, Crown, Zap, RefreshCw, DollarSign,
   LogIn, LogOut, X, Shield, LayoutDashboard, Clock, TrendingUp,
-  CheckCircle, Users, FileText, UserPlus, Trash2,
+  CheckCircle, Users, FileText, UserPlus, Search, Trash2,
   Settings, Save, RotateCw, Upload, AlertCircle, AlertTriangle, UserX, UserCheck, Key, Menu,
   Sun, Moon, MapPin, Briefcase, BarChart3, Download, ChevronRight, ChevronDown, PanelRightClose,
   Calendar, XCircle,
@@ -184,7 +184,10 @@ interface BonusWeek { week_start: string; week_end: string; label: string }
 interface AgentDeal { id: string; contact_name: string; agent_name: string; premium: number; date_added: string | null; policy_number: string; effective_date: string | null; premium_draft_date: string | null; plan_name: string; status: string; payable: boolean; reason: string }
 interface BonusWeekDeals { week_start: string; week_end: string; submitted_deals: AgentDeal[]; submitted_count: number; submitted_premium: number; payable_deals: AgentDeal[]; payable_count: number; payable_premium: number; failed_deals: AgentDeal[]; failed_count: number; failed_premium: number; all_deals_count: number }
 
-type AdminTab = 'dashboard' | 'commission' | 'agents' | 'hourly' | 'submission_agents' | 'settings'
+interface AuditContact { contact_id: string; name: string; policy_number: string; commission_fields: Record<string, string> }
+interface AuditResult { total_contacts: number; contacts_with_commission: number; flagged: AuditContact[] }
+
+type AdminTab = 'dashboard' | 'commission' | 'agents' | 'hourly' | 'submission_agents' | 'audit' | 'settings'
 type AgentTab = 'dashboard' | 'deals'
 
 function Portal() {
@@ -231,6 +234,13 @@ function Portal() {
   const [hourlyWeeks, setHourlyWeeks] = useState<BonusWeek[]>([])
   const [hourlySelectedWeek, setHourlySelectedWeek] = useState<string>('')
   const [hourlyLoading, setHourlyLoading] = useState(false)
+
+  // Commission Audit
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditClearing, setAuditClearing] = useState(false)
+  const [auditSelected, setAuditSelected] = useState<Set<string>>(new Set())
+  const [auditSearch, setAuditSearch] = useState('')
 
   // Admin viewing agent
   const [viewingAgentName, setViewingAgentName] = useState<string | null>(null)
@@ -563,6 +573,7 @@ function Portal() {
     { id: 'agents' as AdminTab, label: 'Agent Management', icon: <Users className="w-5 h-5" /> },
     { id: 'hourly' as AdminTab, label: 'Hourly Report', icon: <Clock className="w-5 h-5" /> },
     { id: 'submission_agents' as AdminTab, label: 'Submission Agents', icon: <UserPlus className="w-5 h-5" /> },
+    { id: 'audit' as AdminTab, label: 'Commission Audit', icon: <Search className="w-5 h-5" /> },
     { id: 'settings' as AdminTab, label: 'Settings', icon: <Settings className="w-5 h-5" /> },
   ]
 
@@ -629,6 +640,7 @@ function Portal() {
                   {currentTab === 'agents' && 'Agent Management'}
                   {currentTab === 'hourly' && 'Hourly Report'}
                   {currentTab === 'submission_agents' && 'Submission Agents'}
+                  {currentTab === 'audit' && 'Commission Audit'}
                   {currentTab === 'settings' && 'Settings'}
                   {currentTab === 'deals' && 'My Deals'}
                 </span>
@@ -639,6 +651,7 @@ function Portal() {
                 {currentTab === 'agents' && 'Agent Management'}
                 {currentTab === 'hourly' && 'Hourly Report'}
                 {currentTab === 'submission_agents' && 'Submission Agents'}
+                {currentTab === 'audit' && 'Commission Audit'}
                 {currentTab === 'settings' && 'Settings'}
                 {currentTab === 'deals' && 'My Deals'}
               </h1>
@@ -1235,6 +1248,154 @@ function Portal() {
               </div>
             </div>
           )}
+
+
+          {/* ===== COMMISSION AUDIT TAB ===== */}
+          {currentTab === 'audit' && isAdmin && (() => {
+            const runAudit = async () => {
+              setAuditLoading(true); setError(''); setAuditResult(null); setAuditSelected(new Set())
+              try {
+                const res = await fetch(API_URL + '/api/commission-sync/' + agencySlug + '/audit', { headers })
+                if (res.ok) { const data = await res.json(); setAuditResult(data) } else { setError('Audit failed: ' + (await res.text())) }
+              } catch { setError('Network error running audit') }
+              setAuditLoading(false)
+            }
+            const clearAll = async () => {
+              if (!confirm('This will clear ALL commission data from ALL GHL contacts. Are you sure?')) return
+              setAuditClearing(true); setError('')
+              try {
+                const res = await fetch(API_URL + '/api/commission-sync/' + agencySlug + '/audit/clear', { method: 'POST', headers })
+                if (res.ok) { const data = await res.json(); setSuccess(data.message); setAuditResult(null) } else { setError('Clear failed: ' + (await res.text())) }
+              } catch { setError('Network error') }
+              setAuditClearing(false)
+            }
+            const clearSelected = async () => {
+              if (auditSelected.size === 0) return
+              if (!confirm(`Clear commission data from ${auditSelected.size} selected contacts?`)) return
+              setAuditClearing(true); setError('')
+              try {
+                const res = await fetch(API_URL + '/api/commission-sync/' + agencySlug + '/audit/clear-selected', {
+                  method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ contact_ids: Array.from(auditSelected) }),
+                })
+                if (res.ok) {
+                  const data = await res.json(); setSuccess(data.message)
+                  setAuditResult(prev => prev ? { ...prev, flagged: prev.flagged.filter(c => !auditSelected.has(c.contact_id)), contacts_with_commission: prev.contacts_with_commission - auditSelected.size } : null)
+                  setAuditSelected(new Set())
+                } else { setError('Clear failed: ' + (await res.text())) }
+              } catch { setError('Network error') }
+              setAuditClearing(false)
+            }
+            const toggleSelect = (id: string) => setAuditSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+            const toggleAll = () => {
+              if (!auditResult) return
+              const filtered = auditResult.flagged.filter(c => !auditSearch || c.name.toLowerCase().includes(auditSearch.toLowerCase()) || c.policy_number.includes(auditSearch))
+              if (auditSelected.size === filtered.length) setAuditSelected(new Set())
+              else setAuditSelected(new Set(filtered.map(c => c.contact_id)))
+            }
+            const filtered = auditResult?.flagged.filter(c => !auditSearch || c.name.toLowerCase().includes(auditSearch.toLowerCase()) || c.policy_number.includes(auditSearch)) || []
+            return (
+            <div className="space-y-6">
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-slate-800 text-lg font-semibold flex items-center gap-2"><Search className="w-5 h-5 text-blue-600" /> Commission Audit</h2>
+                  <div className="flex gap-3">
+                    <button onClick={runAudit} disabled={auditLoading} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 text-sm">
+                      {auditLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                      {auditLoading ? 'Scanning...' : 'Scan Contacts'}
+                    </button>
+                    {auditResult && auditResult.contacts_with_commission > 0 && (
+                      <button onClick={clearAll} disabled={auditClearing} className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 text-sm">
+                        {auditClearing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-slate-500 text-sm">Scan all GHL contacts to find those with commission data. Use this to audit, review, and optionally clear commission fields before re-uploading statements.</p>
+              </div>
+
+              {auditLoading && (
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-12 text-center">
+                  <RefreshCw className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+                  <p className="text-slate-600 font-medium">Scanning all GHL contacts...</p>
+                  <p className="text-slate-400 text-sm mt-1">This may take a few minutes for large locations</p>
+                </div>
+              )}
+
+              {auditResult && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+                      <div className="text-slate-500 text-sm mb-1">Total Contacts</div>
+                      <div className="text-3xl font-bold text-slate-800">{auditResult.total_contacts.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+                      <div className="text-slate-500 text-sm mb-1">With Commission Data</div>
+                      <div className="text-3xl font-bold text-amber-600">{auditResult.contacts_with_commission.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+                      <div className="text-slate-500 text-sm mb-1">Without Commission Data</div>
+                      <div className="text-3xl font-bold text-emerald-600">{(auditResult.total_contacts - auditResult.contacts_with_commission).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  {auditResult.contacts_with_commission > 0 && (
+                    <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
+                        <h3 className="text-slate-800 font-semibold flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" /> Contacts with Commission Data ({filtered.length})</h3>
+                        <div className="flex items-center gap-3">
+                          <input type="text" placeholder="Search by name or policy..." value={auditSearch} onChange={e => setAuditSearch(e.target.value)} className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-800 focus:border-blue-500 outline-none transition w-64" />
+                          {auditSelected.size > 0 && (
+                            <button onClick={clearSelected} disabled={auditClearing} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 text-sm">
+                              <Trash2 className="w-3.5 h-3.5" /> Clear {auditSelected.size} Selected
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                        <table className="w-full">
+                          <thead className="sticky top-0 bg-slate-50"><tr className="border-b border-slate-200">
+                            <th className="px-4 py-3 text-left"><input type="checkbox" checked={filtered.length > 0 && auditSelected.size === filtered.length} onChange={toggleAll} className="rounded" /></th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Name</th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Policy #</th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Commission Fields</th>
+                          </tr></thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {filtered.slice(0, 200).map(c => (
+                              <tr key={c.contact_id} className={`hover:bg-slate-50 transition-colors ${auditSelected.has(c.contact_id) ? 'bg-blue-50' : ''}`}>
+                                <td className="px-4 py-2"><input type="checkbox" checked={auditSelected.has(c.contact_id)} onChange={() => toggleSelect(c.contact_id)} className="rounded" /></td>
+                                <td className="px-4 py-2 text-sm text-slate-800 font-medium">{c.name}</td>
+                                <td className="px-4 py-2 text-sm text-slate-600">{c.policy_number || '—'}</td>
+                                <td className="px-4 py-2 text-xs text-slate-500">
+                                  <div className="flex flex-wrap gap-1">
+                                    {Object.entries(c.commission_fields).slice(0, 5).map(([k, v]) => (
+                                      <span key={k} className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">{k}: {v}</span>
+                                    ))}
+                                    {Object.keys(c.commission_fields).length > 5 && <span className="text-slate-400">+{Object.keys(c.commission_fields).length - 5} more</span>}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                            {filtered.length > 200 && (
+                              <tr><td colSpan={4} className="px-4 py-3 text-center text-slate-400 text-sm">Showing first 200 of {filtered.length} contacts. Use search to filter.</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!auditResult && !auditLoading && (
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-12 text-center">
+                  <Search className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500">Click "Scan Contacts" to find all GHL contacts with commission data</p>
+                </div>
+              )}
+            </div>
+            )
+          })()}
 
           {/* ===== SETTINGS TAB ===== */}
           {currentTab === 'settings' && isAdmin && (

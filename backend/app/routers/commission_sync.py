@@ -11,7 +11,7 @@ import httpx
 logger = logging.getLogger(__name__)
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_role
@@ -1468,3 +1468,168 @@ async def get_unmatched_records(
         for r in sync_log.unmatched_records
     ]
     return {"unmatched_records": records, "total": len(records)}
+
+
+# ── Commission Audit ──────────────────────────────────────────────
+
+
+POLICY_NUMBER_FIELD_ID_AUDIT = POLICY_NUMBER_FIELD_ID
+
+
+@router.get("/{agency_slug}/audit")
+async def commission_audit(
+    agency_slug: str,
+    user: User = Depends(require_role("super_admin", "admin")),
+    db: Session = Depends(get_db),
+):
+    """Scan all GHL contacts and return those with commission data set."""
+    agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
+    if not agency:
+        raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
+
+    api_key = agency.ghl_api_key
+    location_id = agency.ghl_location_id
+    if not api_key or not location_id:
+        raise HTTPException(status_code=400, detail="GHL API key / location not configured")
+
+    # Merge default + agency-specific commission field IDs
+    agency_field_ids = _get_commission_field_ids(agency)
+    field_ids = {**GHL_COMMISSION_FIELD_IDS, **agency_field_ids}
+    field_id_set = set(field_ids.values())
+
+    all_contacts = await _fetch_all_contacts(api_key, location_id)
+
+    flagged: list[dict] = []
+    for raw in all_contacts:
+        custom_fields = raw.get("customFields", [])
+        if not isinstance(custom_fields, list):
+            continue
+
+        # Check if any commission field has a non-empty value
+        commission_vals: dict[str, str] = {}
+        for cf in custom_fields:
+            fid = cf.get("id", "")
+            val = str(cf.get("value", "")).strip()
+            if fid in field_id_set and val and val not in ("0", "0.0", "0.00"):
+                # Reverse-lookup the field name
+                name = next((k for k, v in field_ids.items() if v == fid), fid)
+                commission_vals[name] = val
+
+        if not commission_vals:
+            continue
+
+        # Extract policy number
+        policy_number = ""
+        for cf in custom_fields:
+            if cf.get("id") == POLICY_NUMBER_FIELD_ID_AUDIT:
+                policy_number = str(cf.get("value", "")).strip()
+                break
+
+        first_name = raw.get("firstName", "") or ""
+        last_name = raw.get("lastName", "") or ""
+        flagged.append({
+            "contact_id": raw.get("id", ""),
+            "name": f"{first_name} {last_name}".strip(),
+            "policy_number": policy_number,
+            "commission_fields": commission_vals,
+        })
+
+    return {
+        "total_contacts": len(all_contacts),
+        "contacts_with_commission": len(flagged),
+        "flagged": flagged,
+    }
+
+
+@router.post("/{agency_slug}/audit/clear")
+async def clear_commission_data(
+    agency_slug: str,
+    user: User = Depends(require_role("super_admin", "admin")),
+    db: Session = Depends(get_db),
+):
+    """Clear all commission custom fields from ALL GHL contacts."""
+    agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
+    if not agency:
+        raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
+
+    api_key = agency.ghl_api_key
+    location_id = agency.ghl_location_id
+    if not api_key or not location_id:
+        raise HTTPException(status_code=400, detail="GHL API key / location not configured")
+
+    agency_field_ids = _get_commission_field_ids(agency)
+    field_ids = {**GHL_COMMISSION_FIELD_IDS, **agency_field_ids}
+    field_id_set = set(field_ids.values())
+
+    all_contacts = await _fetch_all_contacts(api_key, location_id)
+
+    # Find contacts with commission data
+    to_clear: list[tuple[str, str]] = []
+    for raw in all_contacts:
+        custom_fields = raw.get("customFields", [])
+        if not isinstance(custom_fields, list):
+            continue
+        has_data = False
+        for cf in custom_fields:
+            fid = cf.get("id", "")
+            val = str(cf.get("value", "")).strip()
+            if fid in field_id_set and val and val not in ("0", "0.0", "0.00"):
+                has_data = True
+                break
+        if has_data:
+            first = raw.get("firstName", "") or ""
+            last = raw.get("lastName", "") or ""
+            to_clear.append((raw.get("id", ""), f"{first} {last}".strip()))
+
+    if not to_clear:
+        return {"cleared": 0, "total_scanned": len(all_contacts), "message": "No contacts with commission data found"}
+
+    # Build clear updates
+    clear_fields = [{"id": fid, "value": ""} for fid in field_id_set]
+    pending_updates = [(cid, clear_fields) for cid, _ in to_clear]
+
+    synced = await _run_concurrent_updates(api_key, pending_updates)
+    return {
+        "cleared": synced,
+        "attempted": len(to_clear),
+        "total_scanned": len(all_contacts),
+        "message": f"Cleared commission data from {synced} of {len(to_clear)} contacts",
+    }
+
+
+@router.post("/{agency_slug}/audit/clear-selected")
+async def clear_selected_commission_data(
+    agency_slug: str,
+    contact_ids: list[str] = Body(..., embed=True),
+    user: User = Depends(require_role("super_admin", "admin")),
+    db: Session = Depends(get_db),
+):
+    """Clear commission fields from specific contacts by ID."""
+    agency = db.query(Agency).filter(Agency.slug == agency_slug).first()
+    if not agency:
+        raise HTTPException(status_code=404, detail="Agency not found")
+    if user.role == "admin" and user.agency_id != agency.id:
+        raise HTTPException(status_code=403, detail="Not your agency")
+
+    api_key = agency.ghl_api_key
+    if not api_key:
+        raise HTTPException(status_code=400, detail="GHL API key not configured")
+
+    if not contact_ids:
+        raise HTTPException(status_code=400, detail="No contact IDs provided")
+
+    agency_field_ids = _get_commission_field_ids(agency)
+    field_ids = {**GHL_COMMISSION_FIELD_IDS, **agency_field_ids}
+    clear_fields = [{"id": fid, "value": ""} for fid in set(field_ids.values())]
+    pending_updates = [(cid, clear_fields) for cid in contact_ids]
+
+    synced = await _run_concurrent_updates(api_key, pending_updates)
+    return {
+        "cleared": synced,
+        "attempted": len(contact_ids),
+        "message": f"Cleared commission data from {synced} of {len(contact_ids)} contacts",
+    }
