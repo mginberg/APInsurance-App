@@ -232,41 +232,24 @@ def _fuzzy_match(
     all_ghl_policies: dict[str, dict],
     name_index: dict[str, list[dict]],
 ) -> dict | None:
-    if policy_nbr:
-        near_matches = [
-            info for ghl_pn, info in all_ghl_policies.items()
-            if _is_off_by_one(policy_nbr, ghl_pn)
-        ]
-        if len(near_matches) == 1:
-            return near_matches[0]
-        if len(near_matches) > 1 and insured_name:
-            csv_parts = insured_name.strip().split()
-            csv_last = _normalize_name(csv_parts[0]) if csv_parts else ""
-            if csv_last:
-                for c in near_matches:
-                    ghl_last = _normalize_name(c.get("last_name", ""))
-                    if ghl_last == csv_last:
-                        return c
-
-    parts = insured_name.strip().split()
-    if not parts:
+    # Only match by off-by-one policy number — never fall back to name-only
+    # matching, which can catastrophically match unrelated people.
+    if not policy_nbr:
         return None
-    csv_last = _normalize_name(parts[0])
-    if not csv_last:
-        return None
-    candidates = name_index.get(csv_last, [])
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1 and len(parts) >= 2:
-        csv_first = _normalize_name(parts[1])
-        for c in candidates:
-            ghl_first = _normalize_name(c.get("first_name", ""))
-            if ghl_first and csv_first and ghl_first == csv_first:
-                return c
-        for c in candidates:
-            ghl_first = _normalize_name(c.get("first_name", ""))
-            if ghl_first and csv_first and ghl_first.startswith(csv_first[:3]):
-                return c
+    near_matches = [
+        info for ghl_pn, info in all_ghl_policies.items()
+        if _is_off_by_one(policy_nbr, ghl_pn)
+    ]
+    if len(near_matches) == 1:
+        return near_matches[0]
+    if len(near_matches) > 1 and insured_name:
+        csv_parts = insured_name.strip().split()
+        csv_last = _normalize_name(csv_parts[0]) if csv_parts else ""
+        if csv_last:
+            for c in near_matches:
+                ghl_last = _normalize_name(c.get("last_name", ""))
+                if ghl_last == csv_last:
+                    return c
     return None
 
 
